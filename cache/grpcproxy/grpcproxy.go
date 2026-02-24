@@ -167,15 +167,22 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 
 		firstIteration := true
 		for {
-			n, err := item.Rc.Read(buf)
-			if err != nil && err != io.EOF {
-				logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
+			n, readErr := item.Rc.Read(buf)
+			if readErr != nil && readErr != io.EOF {
+				logResponse(r.errorLogger, "Write", readErr.Error(), item.Kind, item.Hash)
 				err := stream.CloseSend()
 				if err != nil {
 					logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
 				}
 				return
 			}
+
+			// The ByteStream Write protocol requires finish_write=true on the
+			// last WriteRequest. We set it when the reader signals EOF, whether
+			// that comes with the last data chunk (n>0, readErr==io.EOF) or as
+			// a standalone termination (n==0, readErr==io.EOF).
+			finishWrite := readErr == io.EOF
+
 			if n > 0 {
 				rn := ""
 				if firstIteration {
@@ -185,14 +192,16 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 				req := &bs.WriteRequest{
 					ResourceName: rn,
 					Data:         buf[:n],
+					FinishWrite:  finishWrite,
 				}
-				err := stream.Send(req)
-				if err != nil {
+				if err := stream.Send(req); err != nil {
 					logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
 					return
 				}
-			} else {
-				_, err = stream.CloseAndRecv()
+			}
+
+			if finishWrite {
+				_, err := stream.CloseAndRecv()
 				if err != nil {
 					logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
 					return
