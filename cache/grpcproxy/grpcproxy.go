@@ -299,7 +299,7 @@ func (r *remoteGrpcProxyCache) Get(ctx context.Context, kind cache.EntryKind, ha
 	case cache.AC:
 		digest := pb.Digest{
 			Hash:      hash,
-			SizeBytes: -1,
+			SizeBytes: size,
 		}
 
 		req := &pb.GetActionResultRequest{ActionDigest: &digest}
