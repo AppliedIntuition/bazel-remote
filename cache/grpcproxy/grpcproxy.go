@@ -166,6 +166,7 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 		resourceName := fmt.Sprintf(template, uuid.New().String(), item.Hash, item.LogicalSize)
 
 		firstIteration := true
+		writeOffset := int64(0)
 		for {
 			n, readErr := item.Rc.Read(buf)
 			if readErr != nil && readErr != io.EOF {
@@ -191,6 +192,7 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 				}
 				req := &bs.WriteRequest{
 					ResourceName: rn,
+					WriteOffset:  writeOffset,
 					Data:         buf[:n],
 					FinishWrite:  finishWrite,
 				}
@@ -198,6 +200,7 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 					logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
 					return
 				}
+				writeOffset += int64(n)
 			}
 
 			if finishWrite {
@@ -205,7 +208,8 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 					// All data was sent in previous iterations without FinishWrite.
 					// io.Reader may return (n>0, nil) for the last chunk then
 					// (0, io.EOF) on the next call. Send a zero-data terminal
-					// message so the server sees finish_write=true.
+					// message with the correct write_offset so the server sees
+					// finish_write=true at the right position.
 					rn := ""
 					if firstIteration {
 						firstIteration = false
@@ -213,6 +217,7 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 					}
 					req := &bs.WriteRequest{
 						ResourceName: rn,
+						WriteOffset:  writeOffset,
 						FinishWrite:  true,
 					}
 					if err := stream.Send(req); err != nil {
