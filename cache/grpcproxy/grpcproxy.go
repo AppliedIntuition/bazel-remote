@@ -201,6 +201,25 @@ func (r *remoteGrpcProxyCache) UploadFile(item backendproxy.UploadReq) {
 			}
 
 			if finishWrite {
+				if n == 0 {
+					// All data was sent in previous iterations without FinishWrite.
+					// io.Reader may return (n>0, nil) for the last chunk then
+					// (0, io.EOF) on the next call. Send a zero-data terminal
+					// message so the server sees finish_write=true.
+					rn := ""
+					if firstIteration {
+						firstIteration = false
+						rn = resourceName
+					}
+					req := &bs.WriteRequest{
+						ResourceName: rn,
+						FinishWrite:  true,
+					}
+					if err := stream.Send(req); err != nil {
+						logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
+						return
+					}
+				}
 				_, err := stream.CloseAndRecv()
 				if err != nil {
 					logResponse(r.errorLogger, "Write", err.Error(), item.Kind, item.Hash)
