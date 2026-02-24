@@ -297,9 +297,15 @@ func (r *remoteGrpcProxyCache) Get(ctx context.Context, kind cache.EntryKind, ha
 		// is enabled. We can treat them as AC in this scope
 		fallthrough
 	case cache.AC:
+		actionDigestSize := int64(-1)
+		if v := ctx.Value(cache.ActionDigestSizeBytesKey); v != nil {
+			if sz, ok := v.(int64); ok {
+				actionDigestSize = sz
+			}
+		}
 		digest := pb.Digest{
 			Hash:      hash,
-			SizeBytes: size,
+			SizeBytes: actionDigestSize,
 		}
 
 		req := &pb.GetActionResultRequest{ActionDigest: &digest}
