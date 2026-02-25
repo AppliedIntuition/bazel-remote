@@ -297,9 +297,12 @@ func (r *remoteGrpcProxyCache) Get(ctx context.Context, kind cache.EntryKind, ha
 		// is enabled. We can treat them as AC in this scope
 		fallthrough
 	case cache.AC:
-		actionDigestSize := int64(-1)
+		// Default to 0 when size is unknown (e.g. HTTP frontend which only
+		// carries the hash). -1 causes strict backends like EngFlow to reject
+		// the request outright; 0 signals "unknown" and is accepted.
+		actionDigestSize := int64(0)
 		if v := ctx.Value(cache.ActionDigestSizeBytesKey); v != nil {
-			if sz, ok := v.(int64); ok {
+			if sz, ok := v.(int64); ok && sz >= 0 {
 				actionDigestSize = sz
 			}
 		}
