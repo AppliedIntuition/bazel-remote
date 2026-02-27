@@ -215,10 +215,8 @@ func (h *httpCache) CacheHandler(w http.ResponseWriter, r *http.Request) {
 
 	kind, hash, instance, err := parseRequestURL(r.URL.Path, h.validateAC)
 	if err != nil {
-		// Return 404 so Bazel treats unrecognized paths (e.g. FetchBlob) as
-		// a permanent miss and falls back locally, rather than retrying on 400.
-		http.Error(w, "Not found", http.StatusNotFound)
-		h.logResponse(http.StatusNotFound, r)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.logResponse(http.StatusBadRequest, r)
 		return
 	}
 
