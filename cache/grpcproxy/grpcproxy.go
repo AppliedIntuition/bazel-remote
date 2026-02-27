@@ -331,11 +331,14 @@ func (r *remoteGrpcProxyCache) Get(ctx context.Context, kind cache.EntryKind, ha
 
 	case cache.CAS:
 		if size < 0 {
-			// We don't know the size, so send a FetchBlob request first to get the digest
+			// Size is required to construct the ByteStream resource name.
+			// Try FetchBlob (Remote Asset API) to discover it, but treat
+			// failures as a cache miss rather than a server error — many
+			// backends (e.g. EngFlow) do not implement FetchBlob.
 			digest, err := r.fetchBlobDigest(ctx, hash)
 			if err != nil {
 				logResponse(r.errorLogger, "Fetch", err.Error(), kind, hash)
-				return nil, -1, err
+				return nil, -1, nil
 			}
 			size = digest.SizeBytes
 		}
