@@ -677,6 +677,23 @@ func (c *diskCache) get(ctx context.Context, kind cache.EntryKind, hash string, 
 	}
 	defer c.diskWaitSem.Release(1)
 
+	// If size is unknown, look it up from the in-memory LRU. The LRU entry
+	// may still exist even after the disk file was deleted externally.
+	if size < 0 && kind == cache.CAS {
+		c.mu.Lock()
+		if cachedItem, cachedElem := c.lru.Get(key); cachedElem != nil {
+			size = cachedItem.size
+		}
+		c.mu.Unlock()
+	}
+	if size > 0 && !unreserve {
+		c.mu.Lock()
+		if resErr := c.lru.Reserve(size); resErr == nil {
+			unreserve = true
+		}
+		c.mu.Unlock()
+	}
+
 	r, foundSize, err := c.proxy.Get(ctx, kind, hash, size)
 	if r != nil {
 		defer func() { _ = r.Close() }()
@@ -708,8 +725,7 @@ func (c *diskCache) get(ctx context.Context, kind cache.EntryKind, hash string, 
 	blobFile = tf.Name()
 
 	var sizeOnDisk int64
-	sizeOnDisk, err = io.Copy(tf, r)
-	_ = tf.Close()
+	sizeOnDisk, err = c.writeAndCloseFile(ctx, r, kind, hash, foundSize, tf)
 	if err != nil {
 		return nil, -1, internalErr(err)
 	}
