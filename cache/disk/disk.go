@@ -347,6 +347,17 @@ func (c *diskCache) Put(ctx context.Context, kind cache.EntryKind, hash string, 
 		rc, err := os.Open(blobFile)
 		if err != nil {
 			log.Println("Failed to proxy Put:", err)
+		} else if kind == cache.CAS && !legacy {
+			// Disk stores casblob format (header + zstd chunks). Decompress to
+			// raw bytes before uploading so the proxy stores the blob under the
+			// correct content hash and returns raw bytes on read-back.
+			rawRc, rawErr := casblob.GetUncompressedReadCloser(c.zstd, rc, size, 0)
+			if rawErr != nil {
+				log.Println("Failed to decompress for proxy Put:", rawErr)
+				_ = rc.Close()
+			} else {
+				c.proxy.Put(ctx, kind, hash, size, size, rawRc)
+			}
 		} else {
 			// Doesn't block, should be fast.
 			c.proxy.Put(ctx, kind, hash, size, sizeOnDisk, rc)
