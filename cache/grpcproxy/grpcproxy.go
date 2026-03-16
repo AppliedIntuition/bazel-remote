@@ -351,6 +351,10 @@ func (r *remoteGrpcProxyCache) Get(ctx context.Context, kind cache.EntryKind, ha
 			ResourceName: fmt.Sprintf(template, hash, size),
 		}
 		stream, err := r.clients.bs.Read(ctx, &req)
+		if status.Code(err) == codes.NotFound {
+			logResponse(r.accessLogger, "Read", "Not Found", kind, hash)
+			return nil, -1, nil
+		}
 		if err != nil {
 			logResponse(r.errorLogger, "Read", err.Error(), kind, hash)
 			return nil, -1, err

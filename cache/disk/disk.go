@@ -102,6 +102,15 @@ func internalErr(err error) *cache.Error {
 	}
 }
 
+func isNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var cacheErr *cache.Error
+	return errors.As(err, &cacheErr) && cacheErr.Code == http.StatusNotFound
+}
+
 func badReqErr(format string, a ...interface{}) *cache.Error {
 	return &cache.Error{
 		Code: http.StatusBadRequest,
@@ -889,6 +898,12 @@ func (c *diskCache) GetValidatedActionResult(ctx context.Context, hash string) (
 	for _, d := range result.OutputDirectories {
 		// d was validated in validate.ActionResult but blobs were not checked for existence
 		r, size, err := c.Get(ctx, cache.CAS, d.TreeDigest.Hash, d.TreeDigest.SizeBytes, 0)
+		if isNotFoundErr(err) {
+			if r != nil {
+				_ = r.Close()
+			}
+			return nil, nil, nil
+		}
 		if r == nil {
 			return nil, nil, err // aka "not found", or an err if non-nil
 		}
@@ -905,6 +920,9 @@ func (c *diskCache) GetValidatedActionResult(ctx context.Context, hash string) (
 		var oddata []byte
 		oddata, err = io.ReadAll(r)
 		_ = r.Close()
+		if isNotFoundErr(err) {
+			return nil, nil, nil
+		}
 		if err != nil {
 			return nil, nil, err
 		}

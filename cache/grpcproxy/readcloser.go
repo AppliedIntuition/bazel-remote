@@ -1,6 +1,13 @@
 package grpcproxy
 
-import "io"
+import (
+	"io"
+	"net/http"
+
+	"github.com/buchgr/bazel-remote/v2/cache"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 type StreamReadCloser[M DataMessage] struct {
 	Stream RecvStream[M]
@@ -14,6 +21,21 @@ type DataMessage interface {
 type RecvStream[M DataMessage] interface {
 	Recv() (M, error)
 	CloseSend() error
+}
+
+func translateStreamError(err error) error {
+	if err == nil || err == io.EOF {
+		return err
+	}
+
+	if status.Code(err) == codes.NotFound {
+		return &cache.Error{
+			Code: http.StatusNotFound,
+			Text: err.Error(),
+		}
+	}
+
+	return err
 }
 
 func (s *StreamReadCloser[M]) readFromBuf(p []byte) int {
@@ -45,7 +67,7 @@ func (s *StreamReadCloser[M]) Read(p []byte) (int, error) {
 			return -1, err
 		}
 	} else if err != nil {
-		return -1, err
+		return -1, translateStreamError(err)
 	}
 	s.buf = msg.GetData()
 	n += s.readFromBuf(p[n:])
