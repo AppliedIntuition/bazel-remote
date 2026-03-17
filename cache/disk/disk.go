@@ -27,6 +27,8 @@ import (
 	"github.com/djherbis/atime"
 
 	pb "github.com/buchgr/bazel-remote/v2/genproto/build/bazel/remote/execution/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -108,7 +110,11 @@ func isNotFoundErr(err error) bool {
 	}
 
 	var cacheErr *cache.Error
-	return errors.As(err, &cacheErr) && cacheErr.Code == http.StatusNotFound
+	if errors.As(err, &cacheErr) && cacheErr.Code == http.StatusNotFound {
+		return true
+	}
+
+	return status.Code(err) == codes.NotFound
 }
 
 func badReqErr(format string, a ...interface{}) *cache.Error {
@@ -747,6 +753,9 @@ func (c *diskCache) get(ctx context.Context, kind cache.EntryKind, hash string, 
 		proxyReader = dec
 	}
 	sizeOnDisk, err = c.writeAndCloseFile(ctx, proxyReader, kind, hash, foundSize, tf)
+	if isNotFoundErr(err) {
+		return nil, -1, err
+	}
 	if err != nil {
 		return nil, -1, internalErr(err)
 	}

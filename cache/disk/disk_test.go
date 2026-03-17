@@ -26,6 +26,8 @@ import (
 	testutils "github.com/buchgr/bazel-remote/v2/utils"
 
 	pb "github.com/buchgr/bazel-remote/v2/genproto/build/bazel/remote/execution/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -1451,6 +1453,77 @@ func TestMetricsValidatedAC(t *testing.T) {
 	rawMisses := count(testCache.counter, rawKind, missStatus)
 	if rawMisses != 0 {
 		t.Fatalf("Expected rawMiss counter to be 0, found %f", rawMisses)
+	}
+}
+
+type notFoundReadCloser struct{}
+
+func (notFoundReadCloser) Read([]byte) (int, error) {
+	return 0, status.Error(codes.NotFound, "missing dependent tree digest")
+}
+
+func (notFoundReadCloser) Close() error {
+	return nil
+}
+
+type missingDigestProxy struct{}
+
+func (missingDigestProxy) Put(context.Context, cache.EntryKind, string, int64, int64, io.ReadCloser) {}
+
+func (missingDigestProxy) Get(context.Context, cache.EntryKind, string, int64) (io.ReadCloser, int64, error) {
+	return notFoundReadCloser{}, 123, nil
+}
+
+func (missingDigestProxy) Contains(context.Context, cache.EntryKind, string, int64) (bool, int64) {
+	return false, -1
+}
+
+func TestGetValidatedActionResultTreatsWrappedGrpcNotFoundAsCacheMiss(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cacheDir := testutils.TempDir(t)
+	defer func() { _ = os.RemoveAll(cacheDir) }()
+
+	testCacheI, err := New(
+		cacheDir,
+		1024*32,
+		WithProxyBackend(missingDigestProxy{}),
+		WithAccessLogger(testutils.NewSilentLogger()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testCache := testCacheI.(*diskCache)
+
+	ar := pb.ActionResult{
+		OutputDirectories: []*pb.OutputDirectory{
+			{
+				Path: "out",
+				TreeDigest: &pb.Digest{
+					Hash:      strings.Repeat("a", 64),
+					SizeBytes: 123,
+				},
+			},
+		},
+	}
+	arData, err := proto.Marshal(&ar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actionHash := strings.Repeat("b", 64)
+
+	err = testCache.Put(ctx, cache.AC, actionHash, int64(len(arData)), bytes.NewReader(arData))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotAr, gotData, err := testCache.GetValidatedActionResult(ctx, actionHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAr != nil || gotData != nil {
+		t.Fatal("Expected a cache miss when proxy reports a missing dependent tree digest")
 	}
 }
 
