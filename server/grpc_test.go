@@ -2760,6 +2760,38 @@ func TestInsufficientStorageWhenDeinlining(t *testing.T) {
 		string(receivedActionResult.StderrRaw))
 }
 
+func TestGrpcAcWrappedNotFoundMapsToNotFound(t *testing.T) {
+	t.Parallel()
+
+	testBlobSize := int64(1)
+	_, testBlobHash := testutils.RandomDataAndHash(testBlobSize)
+	testBlobDigest := pb.Digest{
+		Hash:      testBlobHash,
+		SizeBytes: testBlobSize,
+	}
+
+	fixture := grpcTestSetupWithCustomCache(
+		t,
+		false,
+		true,
+		&StubCache{
+			ProgrammedGetError: fmt.Errorf(
+				"failed to validate proxied action result: %w",
+				status.Error(codes.NotFound, "missing dependent tree digest"),
+			),
+		},
+	)
+
+	getACReq := pb.GetActionResultRequest{
+		ActionDigest:      &testBlobDigest,
+		InlineStdout:      false,
+		InlineStderr:      false,
+		InlineOutputFiles: []string{},
+	}
+	_, err := fixture.acClient.GetActionResult(ctx, &getACReq)
+	assertStatusCodeFromError(t, err, codes.NotFound)
+}
+
 func TestInsufficientStorageWhenProxyTriesToStoreCasBlobs(t *testing.T) {
 	t.Parallel()
 
